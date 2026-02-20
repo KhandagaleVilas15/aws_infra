@@ -27,11 +27,12 @@ resource "aws_lb_target_group" "app" {
   health_check {
     enabled             = true
     healthy_threshold   = 2
-    unhealthy_threshold = 3
-    timeout             = 5
+    unhealthy_threshold = 4
+    timeout             = 10
     interval            = 30
-    path                = "/" 
+    path                = "/"
     matcher             = "200-399"
+    protocol            = "HTTP"
   }
 
   tags = {
@@ -70,7 +71,7 @@ resource "aws_lb_listener" "http_redirect" {
   }
 }
 
-## HTTP only (no certificate_arn)
+## HTTP only (no certificate_arn) — forward to targets; use http:// not https://
 resource "aws_lb_listener" "http" {
   count             = var.certificate_arn == "" ? 1 : 0
   load_balancer_arn = aws_lb.main.arn

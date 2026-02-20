@@ -62,7 +62,7 @@ variable "instance_type" {
 }
 
 variable "key_name" {
-  description = "EC2 Key Pair name for SSH (optional)"
+  description = "Existing EC2 Key Pair name (e.g. saas-prod-key). Use the name already in AWS; Terraform does not create or import the .pem file."
   type        = string
   default     = ""
 }

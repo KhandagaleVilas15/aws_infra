@@ -11,6 +11,11 @@ output "alb_dns_name" {
   value       = module.alb.alb_dns_name
 }
 
+output "app_url" {
+  description = "Use this URL in the browser (HTTP only when certificate_arn is empty). If nginx does not respond, check Target Group health in AWS Console."
+  value       = "http://${module.alb.alb_dns_name}"
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URL (push images here)"
   value       = aws_ecr_repository.app.repository_url
