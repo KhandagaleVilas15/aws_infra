@@ -9,7 +9,15 @@ terraform {
     }
   }
 
- 
+  # State in S3 so CI and local share state. Configure with -backend-config or backend.hcl.
+  # Example: terraform init -backend-config="bucket=YOUR_BUCKET" -backend-config="region=us-east-1"
+  backend "s3" {
+    bucket         = "my-terraform-statebucket123"
+    key            = "terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
@@ -93,13 +101,12 @@ resource "aws_ecr_lifecycle_policy" "app" {
 module "vpc" {
   source = "./modules/vpc"
 
-  project_name          = var.project_name
-  environment           = var.environment
-  vpc_cidr              = var.vpc_cidr
-  availability_zones    = var.availability_zones
-  public_subnets        = var.public_subnets
-  private_subnets       = var.private_subnets
-  nat_eip_allocation_id = var.nat_eip_allocation_id
+  project_name       = var.project_name
+  environment        = var.environment
+  vpc_cidr           = var.vpc_cidr
+  availability_zones = var.availability_zones
+  public_subnets     = var.public_subnets
+  private_subnets    = var.private_subnets
 }
 
 

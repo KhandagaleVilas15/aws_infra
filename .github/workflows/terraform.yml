@@ -32,16 +32,7 @@ jobs:
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
-        run: |
-          if [ -z "${{ secrets.TF_BACKEND_BUCKET }}" ]; then
-            echo "::error::Set repository secret TF_BACKEND_BUCKET to your Terraform state S3 bucket. See DEPLOY.md."
-            exit 1
-          fi
-          BACKEND_ARGS="-backend-config=bucket=${{ secrets.TF_BACKEND_BUCKET }} -backend-config=region=${{ env.AWS_REGION }}"
-          if [ -n "${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}" ]; then
-            BACKEND_ARGS="$BACKEND_ARGS -backend-config=dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
-          fi
-          terraform init $BACKEND_ARGS
+        run: terraform init
 
       - name: Import existing resources (idempotent)
         run: |
