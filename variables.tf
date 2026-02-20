@@ -50,9 +50,9 @@ variable "ami_id" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type (t4g = Graviton, ~20% cheaper)"
+  description = "EC2 instance type. Use x86_64 types (e.g. t3.small) with default Ubuntu AMI; use t4g.* for ARM with ami_architecture = arm64."
   type        = string
-  default     = "t4g.small"
+  default     = "t3.small"
 }
 
 variable "key_name" {
@@ -74,9 +74,9 @@ variable "enable_bastion" {
 }
 
 variable "bastion_instance_type" {
-  description = "Instance type for bastion"
+  description = "Instance type for bastion (must match AMI architecture: x86_64 e.g. t3.micro, or arm64 e.g. t4g.micro)"
   type        = string
-  default     = "t4g.micro"
+  default     = "t3.micro"
 }
 
 variable "ecr_repo_name" {
