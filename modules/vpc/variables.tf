@@ -33,3 +33,9 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "nat_eip_allocation_id" {
+  description = "Existing EIP allocation ID to use for the NAT gateway. Set when at EIP limit to reuse an existing EIP; leave empty to create a new one."
+  type        = string
+  default     = ""
+}
+

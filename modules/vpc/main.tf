@@ -52,8 +52,9 @@ resource "aws_subnet" "private" {
   }
 }
 
-# ── Elastic IP for NAT Gateway 
+# ── Elastic IP for NAT Gateway (create only if not using existing)
 resource "aws_eip" "nat" {
+  count  = var.nat_eip_allocation_id == "" ? 1 : 0
   domain = "vpc"
 
   tags = {
@@ -61,9 +62,13 @@ resource "aws_eip" "nat" {
   }
 }
 
+locals {
+  nat_eip_allocation_id = var.nat_eip_allocation_id != "" ? var.nat_eip_allocation_id : aws_eip.nat[0].id
+}
+
 # ── NAT Gateway (in first public subnet) 
 resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
+  allocation_id = local.nat_eip_allocation_id
   subnet_id     = aws_subnet.public[0].id
 
   tags = {

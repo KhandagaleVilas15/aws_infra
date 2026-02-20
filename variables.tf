@@ -42,6 +42,12 @@ variable "private_subnets" {
   default     = ["10.0.11.0/24", "10.0.12.0/24", "10.0.13.0/24"]
 }
 
+variable "nat_eip_allocation_id" {
+  description = "Existing EIP allocation ID for the NAT gateway. Set when at EIP limit; leave empty to create a new EIP."
+  type        = string
+  default     = ""
+}
+
 # ── Compute 
 variable "ami_id" {
   description = "AMI ID for EC2 instances. Leave empty to auto-detect latest Amazon Linux 2023 AMI."
