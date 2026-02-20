@@ -35,22 +35,22 @@ You need AWS CLI set up and Terraform 1.5 or newer.
 
  b) Architecture decisions
 
-- **App servers in private subnets**  
+ **App servers in private subnets**  
   EC2 instances don’t get a public IP. All traffic goes through the load balancer. So even if something is broken, you can’t hit the instances directly from the internet.
 
-- **NAT Gateway instead of a NAT instance**  
+ **NAT Gateway instead of a NAT instance**  
   NAT Gateway is managed by AWS. No patching, no failover scripts. It costs a bit more but we don’t have to babysit it.
 
-- **Ubuntu on the instances**  
+  **Ubuntu on the instances**  
   We use Ubuntu 22.04 LTS. The app runs in Docker (e.g. nginx) so the ALB health check hits port 80 on the instance.
 
-- **IMDSv2 only**  
+ **IMDSv2 only**  
   We turn off the old instance metadata endpoint. That way if something on the box gets hacked, it’s harder to steal IAM creds from metadata.
 
-- **Bastion for SSH (optional)**  
+ **Bastion for SSH (optional)**  
   If you need SSH, you go through one small EC2 in a public subnet. Only IPs you put in `ssh_ingress_cidrs` can reach it. You can also use SSM Session Manager and skip opening SSH at all.
 
----
+
 
  c) Cost estimate
 
@@ -70,36 +70,32 @@ Rough monthly cost in us-east-1 with the defaults (2 app instances, 1 ALB, 1 NAT
 
 d) Security measures
 
-- App EC2s are in **private subnets**, no public IPs.
+ App EC2s are in **private subnets**, no public IPs.
 
-- **Security groups**: only the ALB can talk to app instances on port 80. SSH to app servers only from the bastion (or use SSM).
+ **Security groups**: only the ALB can talk to app instances on port 80. SSH to app servers only from the bastion (or use SSM).
 
-- **EBS** volumes are encrypted (AWS KMS).
+ **EBS** volumes are encrypted (AWS KMS).
 
-- **No IAM keys in code**. EC2 uses an instance profile. If you use GitHub Actions, use OIDC so you don’t store AWS keys in GitHub.
+  **No IAM keys in code**. EC2 uses an instance profile. If you use GitHub Actions, use OIDC so you don’t store AWS keys in GitHub.
 
-- **S3** bucket has all public access blocked.
+  **S3** bucket has all public access blocked.
 
-- **HTTPS**: if you set `certificate_arn`, the ALB does TLS and redirects HTTP to HTTPS.
+ **HTTPS**: if you set `certificate_arn`, the ALB does TLS and redirects HTTP to HTTPS.
 
-- **Secrets**: don’t put real secrets in tfvars or code. Use AWS Secrets Manager (or similar) for app 
+ **Secrets**: don’t put real secrets in tfvars or code. Use AWS Secrets Manager (or similar) for app 
 secrets.
 
-- **IMDSv2** is required on instances so the old metadata API can’t be abused.
+ **IMDSv2** is required on instances so the old metadata API can’t be abused.
 
 
 
 
  e) Scaling strategy
 
-- **Right now**: an Auto Scaling Group keeps 2–6 instances. It scales up when CPU gets high (CloudWatch alarm). Instances sit behind the ALB; when we change the launch template, the ASG does a rolling replace so we don’t take everything down at once.
-- **Health checks**: the ALB checks `/` on port 80. If an instance fails enough checks, it’s marked unhealthy and the ASG replaces it.
-- **If we extend it later**: we could scale on request count instead of CPU, add a CDN in front, or put WAF on the ALB. For a database we’d add RDS/Aurora in private subnets.
+ **Right now**: an Auto Scaling Group keeps 2–6 instances. It scales up when CPU gets high (CloudWatch alarm). Instances sit behind the ALB; when we change the launch template, the ASG does a rolling replace so we don’t take everything down at once.
+ **Health checks**: the ALB checks `/` on port 80. If an instance fails enough checks, it’s marked unhealthy and the ASG replaces it.
+ **If we extend it later**: we could scale on request count instead of CPU, add a CDN in front, or put WAF on the ALB. For a database we’d add RDS/Aurora in private subnets.
 
----
 
- Quick reference
 
-- **ALB URL after deploy**: `terraform output alb_dns_name`
-- **Bastion** (if enabled): `terraform output` for bastion IP/DNS. SSH to bastion first, then from there to the private instance IPs.
-- **Logs**: app/user-data logs can be in CloudWatch under the log groups this stack creates (e.g. `/app/ec2/user-data`).
+
