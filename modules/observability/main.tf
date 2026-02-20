@@ -2,6 +2,12 @@
 # modules/observability/main.tf
 # CloudWatch Log Groups, Alarms, SNS for alerting
 
+locals {
+  # Only create email subscription when endpoint looks like a valid email (SNS rejects empty or invalid)
+  alarm_email_trimmed = trimspace(var.alarm_email)
+  has_valid_email     = local.alarm_email_trimmed != "" && strcontains(local.alarm_email_trimmed, "@")
+}
+
 # ── SNS Topic for Alarm Notifications ─
 resource "aws_sns_topic" "alarms" {
   name = "${var.project_name}-alarms"
@@ -12,11 +18,11 @@ resource "aws_sns_topic" "alarms" {
 }
 
 resource "aws_sns_topic_subscription" "email" {
-  count = var.alarm_email != "" ? 1 : 0
+  count = local.has_valid_email ? 1 : 0
 
   topic_arn = aws_sns_topic.alarms.arn
   protocol  = "email"
-  endpoint  = var.alarm_email
+  endpoint  = local.alarm_email_trimmed
 }
 
 
@@ -123,7 +129,7 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
 
 # ── Budget Alert (only when alarm_email is set; AWS requires at least one subscriber)
 resource "aws_budgets_budget" "monthly" {
-  count = var.alarm_email != "" ? 1 : 0
+  count = local.has_valid_email ? 1 : 0
 
   name              = "${var.project_name}-monthly-budget"
   budget_type       = "COST"
@@ -137,7 +143,7 @@ resource "aws_budgets_budget" "monthly" {
     threshold                  = 80
     threshold_type             = "PERCENTAGE"
     notification_type          = "ACTUAL"
-    subscriber_email_addresses = [var.alarm_email]
+    subscriber_email_addresses = [local.alarm_email_trimmed]
   }
 
   notification {
@@ -145,7 +151,7 @@ resource "aws_budgets_budget" "monthly" {
     threshold                  = 100
     threshold_type             = "PERCENTAGE"
     notification_type          = "FORECASTED"
-    subscriber_email_addresses = [var.alarm_email]
+    subscriber_email_addresses = [local.alarm_email_trimmed]
   }
 }
 
