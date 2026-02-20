@@ -4,10 +4,15 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   id-token: write
   contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: app-prod
 
 jobs:
   terraform:
@@ -21,19 +26,34 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::590716168763:role/github-terraform-role
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
       - name: Terraform Init
-        run: terraform init
+        run: |
+          if [ -z "${{ secrets.TF_BACKEND_BUCKET }}" ]; then
+            echo "::error::Set repository secret TF_BACKEND_BUCKET to your Terraform state S3 bucket. See DEPLOY.md."
+            exit 1
+          fi
+          BACKEND_ARGS="-backend-config=bucket=${{ secrets.TF_BACKEND_BUCKET }} -backend-config=region=${{ env.AWS_REGION }}"
+          if [ -n "${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}" ]; then
+            BACKEND_ARGS="$BACKEND_ARGS -backend-config=dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          fi
+          terraform init $BACKEND_ARGS
+
+      - name: Import existing resources (idempotent)
+        run: |
+          export PROJECT_NAME="${{ env.PROJECT_NAME }}"
+          chmod +x scripts/import-existing-resources.sh
+          bash scripts/import-existing-resources.sh
 
       - name: Terraform Validate
         run: terraform validate
 
       - name: Terraform Plan
-        run: terraform plan
+        run: terraform plan -var="project_name=${{ env.PROJECT_NAME }}" -out=tfplan
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve tfplan
