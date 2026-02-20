@@ -1,0 +1,176 @@
+#!/bin/bash
+exec > /var/log/user-data.log 2>&1
+set -ux
+
+echo "=== Bootstrap started at $(date) ==="
+
+# ── 1. System Update ─────────────────────────────────────────
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -y || true
+apt-get upgrade -y || true
+
+# ── 2. SSM Agent — install FIRST ─────────────────────────────
+apt-get install -y amazon-ssm-agent || true
+systemctl enable amazon-ssm-agent || true
+systemctl start amazon-ssm-agent || true
+echo "SSM Agent status: $(systemctl is-active amazon-ssm-agent || echo 'failed')"
+
+# ── 3. Docker + run app container ────────────────────────────
+%{ if enable_container_app }
+echo "Installing Docker..."
+apt-get install -y docker.io
+systemctl enable docker
+systemctl start docker
+
+# Wait for Docker to be fully ready
+echo "Waiting for Docker to be ready..."
+for i in {1..30}; do
+  if docker info > /dev/null 2>&1; then
+    echo "Docker is ready!"
+    break
+  fi
+  echo "Waiting for Docker... ($i/30)"
+  sleep 2
+done
+
+if ! docker info > /dev/null 2>&1; then
+ 
+  # Skip container setup if Docker isn't working
+else
+  APP_IMAGE="${app_image}"
+  CONTAINER_PORT="${app_container_port}"
+
+  if [ -z "$APP_IMAGE" ]; then
+ 
+    echo "Instance will fail health checks without a running container"
+  else
+    echo "Pulling container image: $APP_IMAGE"
+    # Retry pulling the image up to 3 times
+    IMAGE_PULLED=false
+    for i in {1..3}; do
+      if docker pull "$APP_IMAGE"; then
+        echo "Successfully pulled $APP_IMAGE"
+        IMAGE_PULLED=true
+        break
+      else
+        echo "Failed to pull image (attempt $i/3), retrying..."
+        sleep 10
+      fi
+    done
+
+    if [ "$IMAGE_PULLED" = false ]; then
+      echo "ERROR: Failed to pull container image after 3 attempts"
+      echo "Instance will fail health checks without a running container"
+    else
+      echo "Creating systemd service for container..."
+cat > /etc/systemd/system/app-container.service << UNIT
+[Unit]
+Description=App container from Docker image
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+ExecStartPre=/usr/bin/docker rm -f app 2>/dev/null || true
+ExecStart=/usr/bin/docker run --name app --restart unless-stopped -p 80:$CONTAINER_PORT --log-driver=journald $APP_IMAGE
+ExecStop=/usr/bin/docker stop app
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable app-container.service
+systemctl start app-container.service
+
+# Wait for container to start
+echo "Waiting for container to start..."
+sleep 10
+
+# Verify container is running
+if docker ps | grep -q app; then
+  echo "Container is running successfully!"
+  docker ps | grep app
+else
+  echo "ERROR: Container failed to start"
+  docker ps -a | grep app || echo "No container found"
+  journalctl -u app-container.service --no-pager -n 50 || true
+  echo "Instance will fail health checks - check logs above for details"
+fi
+
+      # Test that the container is responding on port 80
+      echo "Testing container health..."
+      for i in {1..10}; do
+        if curl -f http://localhost:80/ > /dev/null 2>&1; then
+          echo "Container is responding on port 80!"
+          break
+        fi
+        echo "Waiting for container to respond... ($i/10)"
+        sleep 3
+      done
+
+      if ! curl -f http://localhost:80/ > /dev/null 2>&1; then
+        echo "WARNING: Container is running but not responding on port 80"
+        curl -v http://localhost:80/ || true
+      fi
+    fi
+  fi
+fi
+%{ endif }
+
+# ── 4. CloudWatch Agent 
+echo "Installing CloudWatch Agent..."
+wget -q https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb -O /tmp/amazon-cloudwatch-agent.deb || echo "Failed to download CloudWatch agent"
+if [ -f /tmp/amazon-cloudwatch-agent.deb ]; then
+  dpkg -i /tmp/amazon-cloudwatch-agent.deb || apt-get install -f -y || true
+  systemctl enable amazon-cloudwatch-agent || true
+else
+  echo "CloudWatch agent package not downloaded, skipping installation"
+fi
+
+cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'CWA'
+{
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/user-data.log",
+            "log_group_name": "/app/ec2/user-data",
+            "log_stream_name": "{instance_id}"
+          }
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "metrics_collected": {
+      "cpu": {
+        "measurement": ["cpu_usage_idle", "cpu_usage_user"],
+        "metrics_collection_interval": 60
+      },
+      "mem": {
+        "measurement": ["mem_used_percent"],
+        "metrics_collection_interval": 60
+      }
+    }
+  }
+}
+CWA
+
+if [ -f /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl ]; then
+  /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config -m ec2 -s \
+    -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json || true
+  systemctl start amazon-cloudwatch-agent || true
+  echo "CW Agent status: $(systemctl is-active amazon-cloudwatch-agent || echo 'not running')"
+else
+  echo "CloudWatch agent not installed, skipping configuration"
+fi
+
+echo "=== Bootstrap COMPLETE at $(date) ==="
+echo "Checking services status:"
+systemctl list-units --type=service --state=running | grep -E "(docker|ssm|app-container|cloudwatch)" || true
+
