@@ -1,101 +1,132 @@
-# AWS infra (Terraform)
+# AWS Infrastructure (Terraform)
 
-This repo sets up the AWS stuff for the app: VPC, load balancer, EC2 instances behind it, and a few other bits. Everything is in Terraform.
+This repository provisions the AWS infrastructure for the application using Terraform. It sets up the VPC, Application Load Balancer (ALB), EC2 instances, networking components, and supporting services.
 
+a) Deployment Steps
 
+ Prerequisites
 
- a) Deployment steps
+- AWS CLI configured with appropriate credentials
+- Terraform v1.5 or newer installed
 
-You need AWS CLI set up and Terraform 1.5 or newer.
-
-1. **Get the code**
- 
-   git clone <your-repo-url>
-
-   cd aws_infra
- 
-
-2. **Set your settings**  
-   Edit `terraform.tfvars`. You’ll want to set things like `key_name` (your EC2 key), `alarm_email`, and if you use HTTPS, `certificate_arn`.
-
-3. **Init Terraform**
-
-   terraform init
+ 1. Clone the repository
 
 
-4.terraform plan
+git clone <repo-url>
+cd aws_infra
 
 
-5.  terraform apply
-   Type `yes` when it asks.
+ 2. Configure variables
 
-6. **Point your domain**  
-   After apply, run `terraform output alb_dns_name` and point your domain (CNAME or Alias) to that ALB address.
+Edit the `terraform.tfvars` file and set the required values, such as:
 
+- **key_name** – Your EC2 key pair name 
+- **alarm_email** – Email address for CloudWatch alarms
+- **certificate_arn** – ACM certificate ARN (if using HTTPS; leave empty for HTTP only)
 
- b) Architecture decisions
+ 3. Initialize Terraform
+     terraform init
 
- **App servers in private subnets**  
-  EC2 instances don’t get a public IP. All traffic goes through the load balancer. So even if something is broken, you can’t hit the instances directly from the internet.
+ 4. Review the execution plan
+    terraform plan
 
- **NAT Gateway instead of a NAT instance**  
-  NAT Gateway is managed by AWS. No patching, no failover scripts. It costs a bit more but we don’t have to babysit it.
-
-  **Ubuntu on the instances**  
-  We use Ubuntu 22.04 LTS. The app runs in Docker (e.g. nginx) so the ALB health check hits port 80 on the instance.
-
- **IMDSv2 only**  
-  We turn off the old instance metadata endpoint. That way if something on the box gets hacked, it’s harder to steal IAM creds from metadata.
-
- **Bastion for SSH (optional)**  
-  If you need SSH, you go through one small EC2 in a public subnet. Only IPs you put in `ssh_ingress_cidrs` can reach it. You can also use SSM Session Manager and skip opening SSH at all.
+ 5. Apply the configuration
+      terraform apply
 
 
+Type **yes** when prompted to confirm.
 
- c) Cost estimate
+ 6. Point your domain to the Load Balancer
 
-Rough monthly cost in us-east-1 with the defaults (2 app instances, 1 ALB, 1 NAT Gateway):
+After deployment completes:
 
-| Thing            | Rough cost |
-|------------------|------------|
-| EC2 (2 × t3.small) | ~\$30   |
-| Load balancer    | ~\$22     |
-| NAT Gateway      | ~\$35     |
-| EBS (root disks) | ~\$5      |
-| CloudWatch       | ~\$5      |
-| S3 / other       | ~\$2      |
-| **Total**        | **~\$100/month** |
+terraform output alb_dns_name
 
 
-
-d) Security measures
-
- App EC2s are in **private subnets**, no public IPs.
-
- **Security groups**: only the ALB can talk to app instances on port 80. SSH to app servers only from the bastion (or use SSM).
-
- **EBS** volumes are encrypted (AWS KMS).
-
-  **No IAM keys in code**. EC2 uses an instance profile. If you use GitHub Actions, use OIDC so you don’t store AWS keys in GitHub.
-
-  **S3** bucket has all public access blocked.
-
- **HTTPS**: if you set `certificate_arn`, the ALB does TLS and redirects HTTP to HTTPS.
-
- **Secrets**: don’t put real secrets in tfvars or code. Use AWS Secrets Manager (or similar) for app 
-secrets.
-
- **IMDSv2** is required on instances so the old metadata API can’t be abused.
+Create a CNAME (or Alias record) in your DNS provider pointing your domain to the ALB DNS name.
 
 
+b) Architecture Decisions
 
+ Private App Servers
 
- e) Scaling strategy
+- EC2 instances are deployed in **private subnets** and do not have public IP addresses.
+- All inbound traffic flows through the Application Load Balancer. This prevents direct internet access to the instances.
 
- **Right now**: an Auto Scaling Group keeps 2–6 instances. It scales up when CPU gets high (CloudWatch alarm). Instances sit behind the ALB; when we change the launch template, the ASG does a rolling replace so we don’t take everything down at once.
- **Health checks**: the ALB checks `/` on port 80. If an instance fails enough checks, it’s marked unhealthy and the ASG replaces it.
- **If we extend it later**: we could scale on request count instead of CPU, add a CDN in front, or put WAF on the ALB. For a database we’d add RDS/Aurora in private subnets.
+ NAT Gateway (Instead of NAT Instance)
 
+We use an AWS-managed NAT Gateway rather than a self-managed NAT instance.
 
+- No patching required
+- No failover scripting
+- Higher cost, but lower operational overhead
 
+ Ubuntu 22.04 LTS
+
+- Instances run **Ubuntu 22.04 LTS**.
+- The application runs inside Docker (for example, Nginx). The ALB health check targets port 80 on each instance.
+
+ IMDSv2 Only
+
+- **Instance Metadata Service v2 (IMDSv2)** is enforced.
+- The older metadata endpoint is disabled to reduce the risk of credential theft in case of compromise.
+
+ Bastion Host (Optional)
+
+- The bastion is **only** used for SSH login to private EC2 instances (no app traffic).
+- If SSH access is required:
+  - A small EC2 bastion host is deployed in a public subnet
+  - Only IPs defined in **ssh_ingress_cidrs** can access it
+- Alternatively, you can use **AWS Systems Manager Session Manager** and avoid exposing SSH entirely.
+
+For a visual overview, see [docs/architecture.md](docs/architecture.md).
+
+ c) Estimated Monthly Cost
+
+Approximate monthly cost in **us-east-1** with default settings  
+(2 app instances, 1 ALB, 1 NAT Gateway):
+
+| Resource | Estimated Cost |
+|----------|----------------|
+| EC2 (2 × t3.small) | ~$30 |
+| ApplnLB | ~$22 |
+| NAT Gateway | ~$35 |
+| EBS (root volumes) | ~$5 |
+| CloudWatch | ~$5 |
+| S3 / Miscellaneous | ~$2 |
+| **Total** | **~$100/month** |
+
+ d) Security Measures
+
+- **EC2 instances** are in private subnets with no public IPs.
+
+- **Security groups** restrict access:
+  - Only the ALB can reach app instances on port 80
+  - SSH to app servers only via bastion (or use SSM)
+
+- **EBS volumes** are encrypted using AWS KMS.
+
+- **No IAM access keys** stored in code:
+  - EC2 instances use an IAM instance profile
+  - GitHub Actions should use OIDC instead of storing AWS keys
+
+- **S3 bucket** blocks all public access.
+
+- **HTTPS support** via ACM certificate on the ALB; HTTP automatically redirects to HTTPS (when certificate is configured).
+
+- **Secrets** should not be stored in Terraform files — use AWS Secrets Manager (or similar) for sensitive values.
+
+- **IMDSv2** is enforced to prevent metadata abuse.
+
+---
+
+ e) Scaling Strategy
+
+ Current Setup
+
+- **Auto Scaling Group (ASG)** maintains 2–4 instances.
+- Scales out when CPU usage exceeds threshold (CloudWatch alarm).
+- Instances are behind the ALB.
+- Launch template updates trigger rolling instance replacement.
+- **ALB health checks** GET `/` on port 80; unhealthy instances are automatically replaced by the ASG.
 
